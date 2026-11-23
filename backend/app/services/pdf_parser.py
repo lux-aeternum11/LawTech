@@ -39,8 +39,36 @@ _ANY_DATE_RE = re.compile(
     r"\s+(\d{4})\b",
     re.IGNORECASE,
 )
-_INN_RE = re.compile(r"(?:ИНН|инн)\s*[:№]?\s*(\d{10}|\d{12})")
-_OGRN_RE = re.compile(r"(?:ОГРН(?:ИП)?|огрн(?:ип)?)\s*[:№]?\s*(\d{13}|\d{15})")
+_INN_RE = re.compile(r"(?:ИНН|инн)\s*[:№]?\s*(\d{12}|\d{10})(?!\d)")
+_OGRN_RE = re.compile(r"(?:ОГРН(?:ИП)?|огрн(?:ип)?)\s*[:№]?\s*(\d{15}|\d{13})(?!\d)")
+_SNILS_RE = re.compile(r"\d{3}-\d{3}-\d{3}[\s-]\d{2}")
+_SRO_RE = re.compile(
+    r"(?:Союз|Ассоциация|НП)\s*[«\"][^»\"\n]{5,180}"
+    r"(?:арбитражных управляющих|СРО)[^»\"\n]{0,80}[»\"]",
+    re.IGNORECASE,
+)
+_OCR_LATIN_TO_CYR = str.maketrans(
+    {
+        "A": "А",
+        "a": "а",
+        "B": "В",
+        "C": "С",
+        "c": "с",
+        "E": "Е",
+        "e": "е",
+        "H": "Н",
+        "K": "К",
+        "M": "М",
+        "O": "О",
+        "o": "о",
+        "P": "Р",
+        "p": "р",
+        "T": "Т",
+        "X": "Х",
+        "x": "х",
+        "Y": "У",
+    }
+)
 _JUDGE_RE = re.compile(
     r"(?:судья|судьи)\s+"
     r"([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2}|[А-ЯЁ][а-яё]+\s+[А-ЯЁ]\.\s*[А-ЯЁ]\.)",
@@ -100,12 +128,42 @@ def _optional_text(value: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
+def ocr_search_copy(text: str) -> str:
+    """Копия только для поиска. Исходный текст страницы для подсветки не меняется."""
+
+    normalized = text.translate(_DASH_TO_HYPHEN)
+
+    def fix_token(match: re.Match[str]) -> str:
+        token = match.group(0)
+        has_cyrillic = re.search(r"[А-Яа-яЁё]", token) is not None
+        has_latin = re.search(r"[A-Za-z]", token) is not None
+        if has_cyrillic and has_latin:
+            return token.translate(_OCR_LATIN_TO_CYR)
+        return token
+
+    return re.sub(r"\S+", fix_token, normalized)
+
+
+def _match_to_iso(match: re.Match[str]) -> str:
+    if match.group(1):
+        day, month, year = match.group(1).split(".")
+        return f"{year}-{month}-{day}"
+    day, month, year = match.group(2), match.group(3), match.group(4)
+    return f"{year}-{_MONTHS[month.lower()]}-{int(day):02d}"
+
+
+def canonical_case_number(value: str) -> str:
+    """А21-11942/2026: без пробелов, кириллическая А, обычный дефис, верхний регистр."""
+
+    if not re.search(r"\d", value):
+        return " ".join(value.split())
+    cleaned = value.translate(_DASH_TO_HYPHEN)
+    cleaned = re.sub(r"\s+", "", cleaned)
+    return cleaned.upper().replace("A", "А")
+
+
 def _canonical_case_number(value: str) -> str:
-    cleaned = _tidy(value)
-    first = cleaned[0]
-    if first in {"A", "a", "А", "а"}:
-        first = "А"
-    return first + cleaned[1:]
+    return canonical_case_number(value)
 
 
 class SmartPDFParser:
@@ -140,25 +198,59 @@ class SmartPDFParser:
     def _extract_metadata(self, pages: list[PageText]) -> RegexMetadata:
         first_page = pages[0].text if pages else ""
         full_text = "\n".join(page.text for page in pages)
+        search_first = ocr_search_copy(first_page)
+        search_full = ocr_search_copy(full_text)
 
-        case_number = self._first_group(_CASE_NUMBER_RE, first_page)
+        case_number = self._first_group(_CASE_NUMBER_RE, search_first)
         if case_number is None:
-            case_number = self._first_group(_CASE_NUMBER_RE, full_text)
+            case_number = self._first_group(_CASE_NUMBER_RE, search_full)
         if case_number is not None:
             case_number = _canonical_case_number(case_number)
 
         return RegexMetadata(
             case_number=case_number,
-            dates=self._dates(first_page) or self._dates(full_text),
-            inns=self._unique(_INN_RE.findall(first_page) or _INN_RE.findall(full_text)),
-            ogrns=self._unique(_OGRN_RE.findall(first_page) or _OGRN_RE.findall(full_text)),
-            court_name=_optional_text(self._court_name(first_page) or self._court_name(full_text)),
+            dates=self._dates(search_first) or self._dates(search_full),
+            act_date=self._act_date(search_first),
+            inns=self._unique(_INN_RE.findall(search_first) or _INN_RE.findall(search_full)),
+            ogrns=self._unique(_OGRN_RE.findall(search_first) or _OGRN_RE.findall(search_full)),
+            snils_list=self._unique(_SNILS_RE.findall(search_full)),
+            sro_names=self._unique(_tidy(item) for item in _SRO_RE.findall(search_full)),
+            court_name=_optional_text(self._court_name(search_first) or self._court_name(search_full)),
             judge_name=_optional_text(
-                self._first_group(_JUDGE_RE, first_page) or self._first_group(_JUDGE_RE, full_text)
+                self._first_group(_JUDGE_RE, search_first) or self._first_group(_JUDGE_RE, search_full)
             ),
-            document_type=self._document_type(first_page) or self._document_type(full_text),
-            parties=self._parties(full_text),
+            document_type=self._document_type(search_first) or self._document_type(search_full),
+            parties=self._parties(search_full),
         )
+
+    @classmethod
+    def _act_date(cls, first_page: str) -> Optional[str]:
+        """Дата вынесения акта в шапке первой страницы, без дат законов, рождения и ЭП."""
+
+        lowered = first_page.lower()
+        cut = min(len(first_page), 2200)
+        for marker in ("установил", "рассмотрев"):
+            index = lowered.find(marker)
+            if 0 <= index < cut:
+                cut = index
+        header = first_page[:cut]
+        for match in _ANY_DATE_RE.finditer(header):
+            if cls._ignored_date(header, match.start(), match.end()):
+                continue
+            return _match_to_iso(match)
+        return None
+
+    @staticmethod
+    def _ignored_date(text: str, start: int, end: int) -> bool:
+        window = text[max(0, start - 48): end + 24].lower()
+        prefix = text[max(0, start - 12): start].lower()
+        if any(marker in window for marker in ("рожден", "электронн", "подпись действительн", "пленум")):
+            return True
+        if re.search(r"от\s*$", prefix):
+            return True
+        if "закон" in window and re.search(r"от\s*$", prefix):
+            return True
+        return False
 
     @staticmethod
     def _first_group(pattern: re.Pattern[str], text: str) -> Optional[str]:
@@ -219,9 +311,13 @@ class SmartPDFParser:
             window = text[match.end(): match.end() + 120]
             inn_match = _INN_RE.search(window)
             ogrn_match = _OGRN_RE.search(window)
+            role = cls._role(match.group(1))
+            prefix = text[max(0, match.start() - 48): match.start()].lower().replace("ё", "е")
+            if role == "Должник" and "управляющ" in prefix:
+                role = "Финансовый управляющий"
             parties.append(
                 PartyInfo(
-                    role=cls._role(match.group(1)),
+                    role=role,
                     name=name,
                     inn=inn_match.group(1) if inn_match else None,
                     ogrn=ogrn_match.group(1) if ogrn_match else None,
