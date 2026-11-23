@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LawTech — AI-Ассистент юриста</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            navy: "#1B365D",
+          },
+        },
+      },
+    };
+  </script>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <style>
+    mark.hit { background: #fde68a; color: #1e293b; border-radius: 2px; padding: 0 2px; }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-100 text-slate-900">
+  <header class="bg-navy text-white">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4">
+      <div>
+        <p class="text-lg font-semibold tracking-tight">LawTech — AI-Ассистент юриста</p>
+        <p class="text-sm text-slate-200">Факты из акта отдельно от справки по законодательству</p>
+      </div>
+      <div id="llm-badge" class="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-900">
+        Проверка подключения…
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-7xl px-4 py-6">
+    <section id="dashboard" class="space-y-6">
+      <div class="grid gap-4 lg:grid-cols-[1.4fr_0.8fr]">
+        <div id="dropzone" class="rounded-2xl border-2 border-dashed border-navy/30 bg-white p-8 text-center shadow-sm">
+          <i data-lucide="file-up" class="mx-auto h-10 w-10 text-navy"></i>
+          <p class="mt-3 text-lg font-medium text-navy">Перетащите PDF судебного акта сюда или выберите файл</p>
+          <p class="mt-1 text-sm text-slate-500">Разбор откроется сразу после проверки цитат</p>
+          <label class="mt-4 inline-flex cursor-pointer rounded-lg bg-navy px-4 py-2 text-sm font-medium text-white">
+            Выбрать PDF
+            <input id="file-input" type="file" accept="application/pdf,.pdf" multiple class="hidden">
+          </label>
+          <div id="progress" class="mt-5 hidden text-left">
+            <div class="h-2 overflow-hidden rounded-full bg-slate-200">
+              <div id="progress-bar" class="h-full w-1/12 bg-navy transition-all"></div>
+            </div>
+            <ol id="progress-steps" class="mt-3 space-y-1 text-sm text-slate-600"></ol>
+          </div>
+          <p id="upload-error" class="mt-3 hidden text-sm text-red-700"></p>
+        </div>
+        <form id="number-form" class="rounded-2xl bg-white p-6 shadow-sm">
+          <p class="font-medium text-navy">Найти по номеру дела (КАД / СОЮ)</p>
+          <input id="case-number" class="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="А40-154321/2026">
+          <button class="mt-3 w-full rounded-lg bg-navy px-4 py-2 text-sm font-medium text-white" type="submit">Открыть карточку</button>
+          <p id="number-error" class="mt-2 hidden text-sm text-red-700"></p>
+        </form>
+      </div>
+
+      <div class="grid gap-3 sm:grid-cols-3">
+        <article class="rounded-xl bg-white p-4 shadow-sm">
+          <p class="text-sm text-slate-500">Срочные сроки / действия</p>
+          <p id="kpi-urgent" class="mt-1 text-2xl font-semibold text-red-700">0</p>
+        </article>
+        <article class="rounded-xl bg-white p-4 shadow-sm">
+          <p class="text-sm text-slate-500">Ближайшие заседания</p>
+          <p id="kpi-hearings" class="mt-1 text-2xl font-semibold text-navy">0</p>
+        </article>
+        <article class="rounded-xl bg-white p-4 shadow-sm">
+          <p class="text-sm text-slate-500">Всего дел в работе</p>
+          <p id="kpi-total" class="mt-1 text-2xl font-semibold text-navy">0</p>
+        </article>
+      </div>
+
+      <div class="flex flex-wrap gap-2">
+        <button type="button" data-tab="all" class="tab-btn rounded-full bg-navy px-4 py-1.5 text-sm text-white">Все дела</button>
+        <button type="button" data-tab="today" class="tab-btn rounded-full bg-white px-4 py-1.5 text-sm text-navy">Сделать сегодня</button>
+        <button type="button" data-tab="hearings" class="tab-btn rounded-full bg-white px-4 py-1.5 text-sm text-navy">Заседания</button>
+      </div>
+      <div id="case-list" class="space-y-3"></div>
+    </section>
+
+    <section id="review" class="hidden">
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <button id="back-btn" type="button" class="rounded-lg bg-white px-3 py-2 text-sm font-medium text-navy shadow-sm">← Назад к списку дел</button>
+        <div id="case-urgency"></div>
+        <div id="doc-switch" class="flex flex-wrap gap-2"></div>
+      </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <div id="analysis" class="max-h-[78vh] space-y-4 overflow-y-auto pr-1"></div>
+        <div class="flex max-h-[78vh] flex-col overflow-hidden rounded-2xl bg-white shadow-sm">
+          <div id="viewer-head" class="border-b border-slate-100 p-3"></div>
+          <div id="pages" class="space-y-4 overflow-y-auto p-4"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js?v=6"></script>
+</body>
+</html>

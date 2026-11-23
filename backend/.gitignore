@@ -6,3 +6,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 *.db
+uploads/
+code_review.txt
+my_code_only.txt
